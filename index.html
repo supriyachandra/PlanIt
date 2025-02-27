@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Urban Planning Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
+    <style>
+        #map { height: 1000px; width: 100% }
+        #sidebar { 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            background: #f4f4f4; 
+            padding: 20px; 
+            width: 250px; 
+            height: 100vh; 
+            z-index: 1000; 
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+            overflow-y: auto;
+            border-radius: 8px;
+        }
+        #sidebar h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        #sidebar label {
+            display: block;
+            margin: 10px 0;
+        }
+        #sidebar input[type="text"], 
+        #sidebar input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        #sidebar button {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 15px;
+            width: 100%;
+        }
+        #sidebar button:hover {
+            background-color: #45a049;
+        }
+        #map {
+            margin-left: 260px; /* Offset the map to the right of the sidebar */
+            height: 1000px;
+            width: calc(100% - 260px); /* Take full width except the sidebar */
+        }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h3>Urban Plan Options</h3>
+    <label><input type="checkbox" id="showBuildings" checked> Show Buildings</label><br>
+    <label><input type="checkbox" id="showRoads" checked> Show Roads</label><br>
+    <label><input type="checkbox" id="showSewage" checked> Show Sewage</label><br>
+    <label><input type="checkbox" id="showDrainage" checked> Show Drainage</label><br>
+    <label><input type="checkbox" id="showParks" checked> Show Parks</label><br>
+    
+    <h4>Set Center Coordinates and Radius</h4>
+    Latitude: <input type="text" id="lat" value="27.0238"><br>
+    Longitude: <input type="text" id="lng" value="74.2179"><br>
+    Radius (meters): <input type="number" id="radius" value="500"><br>
+    <label>Number of Buildings:</label>
+    <input type="number" id="numBuildings" value="10"><br>
+    Zoom Level: <input type="number" id="zoom" value="16"><br>
+    <button onclick="generateUrbanPlan()">Generate Urban Plan</button>
+    <button id="resetButton" onclick="resetMap()">Reset Map</button>
+
+    <h4>Map View</h4>
+    <label><input type="radio" name="mapType" value="streets" checked> Streets</label><br>
+    <label><input type="radio" name="mapType" value="satellite"> Satellite</label><br>
+    <label><input type="radio" name="mapType" value="terrain"> Terrain</label><br>
+</div>
+
+<div id="map"> </div>
+
+<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+<script>
+    const map = L.map('map').setView(
+    [parseFloat(document.getElementById('lat').value), parseFloat(document.getElementById('lng').value)],
+    parseInt(document.getElementById('zoom').value));
+    const layers = {
+        buildings: L.layerGroup(),
+        roads: L.layerGroup(),
+        sewage: L.layerGroup(),
+        drainage: L.layerGroup(),
+        parks: L.layerGroup(),
+        restrictedAreas: L.layerGroup(),
+        mask: L.layerGroup(),
+    };
+
+    // Define tile layers
+    const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri'
+    });
+
+    const terrainLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        attribution: 'Map data: &copy; OpenStreetMap contributors'
+    });
+
+    // Map view switching logic
+    document.querySelectorAll('input[name="mapType"]').forEach(input => {
+        input.addEventListener('change', function () {
+            map.eachLayer(layer => {
+                if (layer instanceof L.TileLayer) map.removeLayer(layer);
+            });
+
+            if (this.value === 'streets') streetLayer.addTo(map);
+            else if (this.value === 'satellite') satelliteLayer.addTo(map);
+            else if (this.value === 'terrain') terrainLayer.addTo(map);
+        });
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    function generateUrbanPlan() {
+        const lat = parseFloat(document.getElementById('lat').value);
+        const lng = parseFloat(document.getElementById('lng').value);
+        const radius = parseInt(document.getElementById('radius').value);
+    
+        if (!lat || !lng || isNaN(radius) || radius <= 0) {
+            alert("Invalid coordinates or radius.");
+            return;
+        }
+    
+        clearUrbanLayers();
+    
+        L.circle([lat, lng], { radius: radius, color: 'black', weight: 1, fillColor: 'transparent' })
+            .addTo(map);
+    
+        addRestrictedAreas(lat, lng, radius);
+    
+        if (document.getElementById('showBuildings').checked) generateBuildings(lat, lng, radius);
+        if (document.getElementById('showRoads').checked) generateRoads(lat, lng, radius);
+        if (document.getElementById('showSewage').checked) generateSewage(lat, lng, radius);
+        if (document.getElementById('showDrainage').checked) generateDrainage(lat, lng, radius);
+        if (document.getElementById('showParks').checked) generateParks(lat, lng, radius);
+    
+        for (const layer in layers) {
+            layers[layer].addTo(map);
+        }
+    }
+
+    function generateBuildings(lat, lng, radius) {
+        const numBuildingsPerRow = parseInt(document.getElementById('numBuildings').value) || 10;
+        const buildingSpacing = (2 * radius) / numBuildingsPerRow;
+    
+        console.log("Building grid generation started");
+        
+        for (let i = 0; i < numBuildingsPerRow; i++) {
+            for (let j = 0; j < numBuildingsPerRow; j++) {
+                const offsetLat = (i - numBuildingsPerRow / 2) * buildingSpacing / 111320;
+                const offsetLng = (j - numBuildingsPerRow / 2) * buildingSpacing / (111320 * Math.cos(lat * Math.PI / 180));
+                const buildingLat = lat + offsetLat;
+                const buildingLng = lng + offsetLng;
+    
+                const distanceFromCenter = Math.sqrt(
+                    Math.pow(buildingLat - lat, 2) + Math.pow(buildingLng - lng, 2)
+                ) * 111320;
+    
+                // Only add buildings within the specified radius
+                if (distanceFromCenter <= radius) {
+                    const building = L.rectangle(
+                        [
+                            [buildingLat - 0.00005, buildingLng - 0.00005],
+                            [buildingLat + 0.00005, buildingLng + 0.00005]
+                        ],
+                        {
+                            color: 'red',
+                            weight: 1,
+                            fillColor: 'red',
+                            fillOpacity: 0.5
+                        }
+                    ).addTo(layers.buildings);
+    
+                    // Debug: Log building placement
+                    console.log("Building added at:", buildingLat, buildingLng);
+                }
+            }
+        }
+    
+        console.log("Building generation completed");
+    }
+
+    function generateRoads(lat, lng, radius) {
+        const numRoads = 8; 
+        const angleIncrement = 360 / numRoads;
+    
+        for (let i = 0; i < numRoads; i++) {
+            const angle = i * angleIncrement * (Math.PI / 180); 
+            const roadEndLat = lat + (radius / 111320) * Math.cos(angle);
+            const roadEndLng = lng + (radius / (111320 * Math.cos(lat * Math.PI / 180))) * Math.sin(angle);
+    
+            L.polyline([[lat, lng], [roadEndLat, roadEndLng]], { color: 'blue', weight: 2 })
+                .addTo(layers.roads);
+        }
+    }
+
+    function generateSewage(lat, lng, radius) {
+        const sewageOutlet = [lat + 0.002, lng]; 
+    
+        layers.buildings.eachLayer(building => {
+            const buildingLatLng = building.getBounds().getCenter();
+            L.polyline([buildingLatLng, sewageOutlet], { color: 'green', weight: 2 })
+                .addTo(layers.sewage);
+        });
+    
+        L.circle(sewageOutlet, { radius: 50, color: 'green', fillColor: 'green', fillOpacity: 0.5 })
+            .bindPopup("Sewage Outlet")
+            .addTo(layers.sewage);
+    }
+
+    function generateDrainage(lat, lng, radius) {
+        const drainageOutlets = [
+            [lat + 0.003, lng + 0.003],
+            [lat - 0.003, lng - 0.003],
+        ];
+    
+        layers.buildings.eachLayer(building => {
+            const buildingLatLng = building.getBounds().getCenter();
+    
+            const nearestOutlet = drainageOutlets.reduce((nearest, current) => {
+                const nearestDist = Math.sqrt(
+                    Math.pow(nearest[0] - buildingLatLng.lat, 2) +
+                    Math.pow(nearest[1] - buildingLatLng.lng, 2)
+                );
+                const currentDist = Math.sqrt(
+                    Math.pow(current[0] - buildingLatLng.lat, 2) +
+                    Math.pow(current[1] - buildingLatLng.lng, 2)
+                );
+                return currentDist < nearestDist ? current : nearest;
+            });
+    
+            L.polyline([buildingLatLng, nearestOutlet], {
+                color: 'purple',
+                weight: 2,
+                dashArray: '5, 5' 
+            }).addTo(layers.drainage);
+        });
+    
+        drainageOutlets.forEach(outlet => {
+            L.circleMarker(outlet, {
+                radius: 5,
+                color: 'purple',
+                fillColor: 'purple',
+                fillOpacity: 0.8
+            }).bindPopup("Drainage Outlet").addTo(layers.drainage);
+        });
+    }
+
+    function generateParks(lat, lng, radius) {
+        const parkSpacing = radius / 4; 
+        const parkSize = 0.0003;
+    
+        for (let i = -1; i <= 1; i++) {
+            for (let j = -1; j <= 1; j++) {
+                if (i === 0 && j === 0) continue;
+                const parkLat = lat + (i * parkSpacing) / 111320;
+                const parkLng = lng + (j * parkSpacing) / (111320 * Math.cos(lat * Math.PI / 180));
+    
+                L.rectangle(
+                    [
+                        [parkLat - parkSize, parkLng - parkSize],
+                        [parkLat + parkSize, parkLng + parkSize],
+                    ],
+                    { color: 'green', weight: 1, fillColor: 'green', fillOpacity: 0.5 }
+                )
+                    .bindPopup("Park")
+                    .addTo(layers.parks);
+            }
+        }
+    }
+
+    function addRestrictedAreas(lat, lng, radius) {
+        const restrictedAreas = [
+            { lat: lat + 0.002, lng: lng + 0.002, radius: 100, color: 'gray' },
+            { lat: lat - 0.002, lng: lng - 0.002, radius: 100, color: 'gray' },
+        ];
+    
+        restrictedAreas.forEach(area => {
+            L.circle([area.lat, area.lng], {
+                radius: area.radius,
+                color: area.color,
+                fillColor: area.color,
+                fillOpacity: 0.4,
+            })
+                .bindPopup("Restricted Area")
+                .addTo(layers.restrictedAreas);
+        });
+    }
+
+    function clearUrbanLayers() {
+        for (const layer in layers) {
+            layers[layer].clearLayers();
+        }
+    }
+
+    function resetMap() {
+        const lat = parseFloat(document.getElementById('lat').value);
+        const lng = parseFloat(document.getElementById('lng').value);
+        const zoom = parseInt(document.getElementById('zoom').value);
+    
+        map.setView([lat, lng], zoom);
+        clearUrbanLayers();
+    }  
+    
+    function updateMapCenter() {
+        const lat = parseFloat(document.getElementById('lat').value);
+        const lng = parseFloat(document.getElementById('lng').value);
+        const zoom = parseInt(document.getElementById('zoom').value);
+    
+        if (!isNaN(lat) && !isNaN(lng) && !isNaN(zoom)) {
+            map.setView([lat, lng], zoom);
+        }
+    }
+    
+    document.getElementById('lat').addEventListener('input', updateMapCenter);
+    document.getElementById('lng').addEventListener('input', updateMapCenter);
+    document.getElementById('zoom').addEventListener('input', updateMapCenter);
+
+    for (const layer in layers) {
+        layers[layer].addTo(map);
+    }
+</script>
+
+</body>
+</html>
